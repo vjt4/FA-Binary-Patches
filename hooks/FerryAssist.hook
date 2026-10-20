@@ -8,3 +8,11 @@
 
 0x0060F0E9:
     call @GetFerryCommandsAndPromoteAssistant
+
+# Moho::CUnitGuardTask::TaskTick ferry-task creation call sites
+# Construct the normal task, then attempt promotion before its pickup cycle.
+0x0061465B:
+    call @CreateFerryTaskAndPromoteAssistant
+
+0x0061466F:
+    call @CreateFerryTaskAndPromoteAssistant
