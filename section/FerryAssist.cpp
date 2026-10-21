@@ -2,84 +2,45 @@
 #include <cstdint>
 
 #include "moho.h"
+#include "global.h"
 
 namespace
 {
-    constexpr std::uintptr_t GetFerryCommandsAddress = 0x0060EB50;
-    constexpr std::uintptr_t CreateFerryTaskAddress = 0x0060F7E0;
-
-    constexpr std::uint32_t GuardCommand = 15;
-    constexpr std::uint32_t FerryCommand = 17;
-
-    // The shared engine declarations omit padding for undocumented fields, so
-    // these two members must be read through their verified binary offsets.
-    constexpr std::uintptr_t UnitCommandQueueOffset = 0x4B4;
-    constexpr std::uintptr_t CommandTypeOffset = 0x98;
-
-    // Only the fields used by this patch are mapped. The two weak object links
-    // point four bytes into their objects and must be adjusted before use.
-    struct FerryTask
-    {
-        std::uint8_t reserved00[0x1C];
-        Unit *assistant;
-        std::uint8_t reserved20[0x18];
-        bool followsBeacon;
-        std::uint8_t reserved39[0x0F];
-        void *routeUnitLink;
-        std::uint8_t reserved4C[0x0C];
-        void *beaconLink;
-    };
-
-    static_assert(offsetof(FerryTask, assistant) == 0x1C);
-    static_assert(offsetof(FerryTask, followsBeacon) == 0x38);
-    static_assert(offsetof(FerryTask, routeUnitLink) == 0x48);
-    static_assert(offsetof(FerryTask, beaconLink) == 0x58);
-
     using CommandVector = vector<SCommand>;
 
-    struct CommandQueueLayout
-    {
-        void *reserved00;
-        void *reserved04;
-        Unit *owner;
-        CommandVector commands;
-    };
-
-    static_assert(offsetof(CommandQueueLayout, commands) == 0x0C);
-
     using GetFerryCommandsFunction = void (__attribute__((stdcall)) *)(
-        FerryTask *ferryTask,
+        CUnitFerryTask *ferryTask,
         CommandVector *routeCommands
     );
 
-    using CreateFerryTaskFunction = FerryTask *(__attribute__((cdecl)) *)(
+    using CreateFerryTaskFunction = CUnitFerryTask *(__attribute__((cdecl)) *)(
         void *parentTask,
         Unit *targetUnit
     );
 
     CUnitCommand *GetCommand(const SCommand &entry)
     {
-        if (!entry.CUnitCommand)
+        if (!entry.weakCommandLink)
         {
             return nullptr;
         }
 
         // SCommand stores the command's weak-object link at object + 4.
         return reinterpret_cast<CUnitCommand *>(
-            reinterpret_cast<std::uintptr_t>(entry.CUnitCommand) - 4
+            reinterpret_cast<std::uintptr_t>(entry.weakCommandLink) - 4
         );
     }
 
     std::uint32_t GetCommandType(CUnitCommand *command)
     {
         return *reinterpret_cast<std::uint32_t *>(
-            reinterpret_cast<std::uintptr_t>(command) + CommandTypeOffset
+            reinterpret_cast<std::uintptr_t>(command) + CUnitCommandTypeOffset
         );
     }
 
-    CommandQueueLayout *GetCommandQueue(Unit *unit)
+    CUnitCommandQueue *GetCommandQueue(Unit *unit)
     {
-        return *reinterpret_cast<CommandQueueLayout **>(
+        return *reinterpret_cast<CUnitCommandQueue **>(
             reinterpret_cast<std::uintptr_t>(unit) + UnitCommandQueueOffset
         );
     }
@@ -106,7 +67,10 @@ namespace
         for (const SCommand *entry = commands.begin; entry != commands.end; ++entry)
         {
             CUnitCommand *command = GetCommand(*entry);
-            if (!command || GetCommandType(command) != FerryCommand)
+            if (
+                !command
+                || GetCommandType(command) != static_cast<std::uint32_t>(UnitCommandType::Ferry)
+            )
             {
                 return false;
             }
@@ -115,7 +79,7 @@ namespace
         return true;
     }
 
-    void InsertCommandToQueue(CommandQueueLayout *queue, CUnitCommand *command, int index)
+    void InsertCommandToQueue(CUnitCommandQueue *queue, CUnitCommand *command, int index)
     {
         // Moho::CUnitCommandQueue::InsertCommandToQueue uses a custom calling
         // convention: command in EAX, queue in EBX, and index on the stack.
@@ -129,7 +93,7 @@ namespace
         );
     }
 
-    void RemoveFirstCommandFromQueue(CommandQueueLayout *queue)
+    void RemoveFirstCommandFromQueue(CUnitCommandQueue *queue)
     {
         asm volatile(
             "push %[queue];"
@@ -172,7 +136,7 @@ namespace
         routeCommands->capacity_end = nullptr;
     }
 
-    void PromoteAssistant(FerryTask *ferryTask, CommandVector *routeCommands)
+    void PromoteAssistant(CUnitFerryTask *ferryTask, CommandVector *routeCommands)
     {
         if (!ferryTask || !routeCommands || !ferryTask->followsBeacon)
         {
@@ -191,7 +155,7 @@ namespace
             return;
         }
 
-        CommandQueueLayout *assistantQueue = GetCommandQueue(assistant);
+        CUnitCommandQueue *assistantQueue = GetCommandQueue(assistant);
         if (!assistantQueue)
         {
             return;
@@ -204,7 +168,7 @@ namespace
 
         if (
             !assistantCommand
-            || GetCommandType(assistantCommand) != GuardCommand
+            || GetCommandType(assistantCommand) != static_cast<std::uint32_t>(UnitCommandType::Guard)
             || !IsFerryRoute(*routeCommands)
         )
         {
@@ -228,22 +192,22 @@ namespace
 // here. Resolve and copy its existing route immediately, before the normal
 // ferry-assist pickup cycle begins. The later GetUnitCommands hooks remain a
 // fallback when the route is not yet resolvable at construction time.
-extern "C" FerryTask *__attribute__((cdecl, used)) CreateFerryTaskAndPromoteAssistant(
+extern "C" CUnitFerryTask *__attribute__((cdecl, used)) CreateFerryTaskAndPromoteAssistant(
     void *parentTask,
     Unit *targetUnit
 ) asm("CreateFerryTaskAndPromoteAssistant");
 
-extern "C" FerryTask *__attribute__((cdecl, used)) CreateFerryTaskAndPromoteAssistant(
+extern "C" CUnitFerryTask *__attribute__((cdecl, used)) CreateFerryTaskAndPromoteAssistant(
     void *parentTask,
     Unit *targetUnit
 )
 {
-    FerryTask *ferryTask = reinterpret_cast<CreateFerryTaskFunction>(
-        CreateFerryTaskAddress
+    CUnitFerryTask *ferryTask = reinterpret_cast<CreateFerryTaskFunction>(
+        CreateCUnitFerryTaskAddress
     )(parentTask, targetUnit);
 
     CommandVector routeCommands{};
-    reinterpret_cast<GetFerryCommandsFunction>(GetFerryCommandsAddress)(
+    reinterpret_cast<GetFerryCommandsFunction>(CUnitFerryTaskGetUnitCommandsAddress)(
         ferryTask,
         &routeCommands
     );
@@ -257,16 +221,16 @@ extern "C" FerryTask *__attribute__((cdecl, used)) CreateFerryTaskAndPromoteAssi
 // returns its ferry commands. Reuse those command objects so the assistant
 // becomes an owner of the existing route instead of creating a new beacon.
 extern "C" void __attribute__((stdcall, used)) GetFerryCommandsAndPromoteAssistant(
-    FerryTask *ferryTask,
+    CUnitFerryTask *ferryTask,
     CommandVector *routeCommands
 ) asm("GetFerryCommandsAndPromoteAssistant");
 
 extern "C" void __attribute__((stdcall, used)) GetFerryCommandsAndPromoteAssistant(
-    FerryTask *ferryTask,
+    CUnitFerryTask *ferryTask,
     CommandVector *routeCommands
 )
 {
-    reinterpret_cast<GetFerryCommandsFunction>(GetFerryCommandsAddress)(
+    reinterpret_cast<GetFerryCommandsFunction>(CUnitFerryTaskGetUnitCommandsAddress)(
         ferryTask,
         routeCommands
     );
