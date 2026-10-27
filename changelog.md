@@ -312,7 +312,16 @@ These new features have been added in a backwards compatible manner
   - hooks/TeamColorMode.cpp
   - section/TeamColorMode.cpp
 
-- Adds the order ID to the UserUnit:GetCommandQueue output
+- Adds command IDs to the UI `UserUnit:GetCommandQueue()` output:
+
+  - `ID` preserves the existing numeric field for backwards compatibility. It
+    can lose precision because the UI `lua_Number` is a 32-bit float.
+  - `ExactID` contains the same signed 32-bit command ID as a lossless decimal
+    string.
+
+- Adds the UI function `DeleteCommandExact(exactId)`. It accepts an `ExactID`
+  string and deletes that exact command without converting the ID through a
+  floating-point Lua number.
 
   - hooks/HOrderIDOutput.cpp
   - section/OrderIDOutput.cpp
