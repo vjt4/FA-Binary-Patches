@@ -386,3 +386,11 @@ These new features have been added in a backwards compatible manner
 - Add `Unit:ForceAltFootPrint` that forces game to use AltFootprint for the unit (applied to Salem in particular)
   - hooks/EntityGetFootprint.cpp
   - section/EntityGetFootprint.cpp
+
+- Adds reclaim hold to the main world view. While native reclaim command mode is
+  active, holding Shift and the left mouse button issues reclaim orders as the
+  cursor moves over props. Each prop is ordered at most once per hold gesture.
+
+  - Enabled by default and controlled by the `ui_ReclaimHold` console variable.
+  - hooks/ReclaimHold.cpp
+  - section/ReclaimHold.cpp
