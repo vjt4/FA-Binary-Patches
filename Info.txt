@@ -262,6 +262,22 @@ const int _Moho_SSTICommandIssueData_Destructor = 0x0057ABB0;
 #define _GetCatCmpResult = 0x0067B050;
 #define _Moho_SSTICommandIssueData_SSTICommandIssueData = 0x00552550;
 
+// Offsets
+// Relative structure offsets for the supported Forged Alliance executable.
+// These are reverse-engineered implementation details, not stable APIs.
+#define CUIWorldView_IsMinimap = 0x135;          // byte
+#define CUIWorldView_CommandMode = 0x148;        // int32
+#define CUIWorldView_CommandCaps = 0x14C;        // int32
+#define CUIWorldView_WorldSession = 0x208;       // pointer
+#define CUIWorldView_CursorInside = 0x275;       // byte
+#define WorldSession_Selection = 0x4A0;          // embedded structure
+#define WorldSession_Cursor = 0x4B0;             // embedded structure
+#define Cursor_WorldPosition = 0x04;             // Vector3f
+#define Cursor_HoveredEntityWeakOwner = 0x10;    // pointer
+#define Entity_WeakOwner = 0x08;                 // embedded structure
+#define Entity_Id = 0x44;                        // uint32
+#define Entity_UnknownStateFlag = 0x145;         // byte, exact name unknown
+
 // MSVCR80.dll
 #define _memmove_s = 0x00A824E7;
 

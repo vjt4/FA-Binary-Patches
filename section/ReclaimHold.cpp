@@ -2,12 +2,24 @@
 #include "magic_classes.h"
 #include "moho.h"
 
+// Implements sweep reclaim entirely in the UI command path.
+//
+// While native reclaim mode, Shift, and left mouse are active:
+// 1. The world-view frame hook reads the entity under the cursor.
+// 2. Each entity is accepted only once during the current hold gesture.
+// 3. A native reclaim command is constructed and issued for the selection.
+// 4. The command-issue hook suppresses duplicate reclaim commands.
+//
+// Releasing either button or leaving reclaim mode clears the gesture cache.
+
 namespace {
 
 using EntId = uint32_t;
 
 constexpr int kVirtualKeyLeftButton = 0x01;
 constexpr int kVirtualKeyShift = 0x10;
+
+// Reverse-engineered UI and command values.
 constexpr int32_t kCommandModeOrder = 1;
 constexpr int32_t kCommandCapsReclaim = 0x00100000;
 constexpr int32_t kReclaimCommand = 0x13;
@@ -34,6 +46,10 @@ bool reclaimHoldEnabled = true;
 EntId sweepTargets[kSweepTargetCapacity]{};
 size_t sweepTargetCount = 0;
 bool sweepActive = false;
+
+// Synthetic orders pass through the duplicate-suppression hook too. Mark the
+// target created by the frame hook as preapproved so its first issue is not
+// mistaken for a duplicate of the cache entry that was just added.
 bool sweepTargetPreapproved = false;
 EntId preapprovedTarget = 0;
 EntId lastHoveredTarget = 0;
@@ -43,6 +59,8 @@ bool IsNativeReclaimMode(const void *view) {
     if (!view)
         return false;
 
+    // World-view +0x148 stores the command-mode type and +0x14C stores its
+    // command-capability mask.
     const auto *bytes = reinterpret_cast<const uint8_t *>(view);
     const int32_t mode = *reinterpret_cast<const int32_t *>(bytes + 0x148);
     const int32_t commandCaps =
@@ -136,6 +154,9 @@ extern "C" bool __cdecl ReclaimHoldShouldSuppress(
     return !RememberSweepTarget(target);
 }
 
+// Calling-convention adapter for the native command constructor at 0x00552550.
+// The engine expects the command pointer and type in a nonstandard mixture of
+// stack locations and registers.
 extern "C" __attribute__((naked)) void __cdecl ReclaimHoldCommandConstructor(
     void *, int32_t)
 {
@@ -148,6 +169,8 @@ extern "C" __attribute__((naked)) void __cdecl ReclaimHoldCommandConstructor(
     );
 }
 
+// Calling-convention adapter for the native UI command issuer at 0x008B05E0.
+// It issues the constructed command for the current UI selection.
 extern "C" __attribute__((naked)) void __cdecl ReclaimHoldIssueCommand(
     void *, void *, bool)
 {
@@ -170,6 +193,9 @@ extern "C" void __stdcall ReclaimHoldFrameUpdate(void *view)
         return;
 
     auto *viewBytes = reinterpret_cast<uint8_t *>(view);
+
+    // +0x135 identifies a minimap view. Sweep reclaim is limited to the main
+    // world view.
     const bool isMinimap = viewBytes[0x135] != 0;
     if (isMinimap)
         return;
@@ -177,14 +203,18 @@ extern "C" void __stdcall ReclaimHoldFrameUpdate(void *view)
     if (!UpdateSweepGesture(view))
         return;
 
+    // +0x275 indicates whether the cursor is inside this world view.
     const bool cursorInside = viewBytes[0x275] != 0;
     if (!cursorInside)
         return;
 
+    // +0x208 points to the world session containing cursor and selection data.
     auto *session = *reinterpret_cast<uint8_t **>(viewBytes + 0x208);
     if (!session)
         return;
 
+    // The cursor record begins at session +0x4B0. Its +0x10 field contains a
+    // weak-owner pointer embedded eight bytes into the hovered entity.
     uint8_t *cursor = session + 0x4B0;
     auto *weakOwner = *reinterpret_cast<uint8_t **>(cursor + 0x10);
     if (!weakOwner)
@@ -212,6 +242,9 @@ extern "C" void __stdcall ReclaimHoldFrameUpdate(void *view)
     reinterpret_cast<CommandDestructorFn>(0x0057ABB0)(command);
 }
 
+// World-view frame hook. Preserve the original registers and flags, call the
+// sweep update with the current view from ESI, replay the overwritten CMP, and
+// continue at the first instruction after the patched bytes.
 extern "C" __attribute__((naked)) void ReclaimHoldFrameHook()
 {
     asm volatile(
@@ -229,6 +262,9 @@ extern "C" __attribute__((naked)) void ReclaimHoldFrameHook()
     );
 }
 
+// Global UI command-issue hook. Return immediately when the command is a
+// duplicate that should be suppressed; otherwise replay the overwritten
+// function prologue and continue inside the original function at 0x008B05E7.
 extern "C" __attribute__((naked)) void ReclaimHoldIssueHook()
 {
     asm volatile(
