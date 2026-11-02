@@ -197,7 +197,7 @@ These don't matter except for other assembly patches
 
 - Allow structure placement previews and build orders over static blockers
   when a current-focus-army engineer has a queued reclaim order targeting each
-  blocker.
+  blocker. For use such as building ontop of pgens when queing reclaim, or correcting miss placed factories without having to wait for reclaiming to complete
 
   - hooks/Overbuilding.cpp
   - section/Overbuilding.cpp
